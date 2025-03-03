@@ -28,7 +28,6 @@ export default function Home() {
   const [isExpanded, setIsExpanded] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [isInputFocused, setIsInputFocused] = useState(false);
-  const [hasGuessed, setHasGuessed] = useState(false);
   const [guesses, setGuesses] = useState<string[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [showHints, setShowHints] = useState(false);
@@ -136,7 +135,7 @@ export default function Home() {
             setShowHints(calculatedHints > 0);
           }
           
-          setHasGuessed(gameState.guesses?.length > 0 || false);
+          setHasWon(gameState.hasWon);
           
           // If user has won in the saved state
           if (gameState.hasWon) {
@@ -335,7 +334,6 @@ export default function Home() {
       // Always add the guess to the list
       const newGuesses = [inputValue, ...guesses];
       setGuesses(newGuesses);
-      setHasGuessed(true);
       
       // Check if the guess is correct
       if (dailyItem && normalizeInput(dailyItem.name) === normalizedInput) {
