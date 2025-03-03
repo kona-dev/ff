@@ -1,3 +1,5 @@
+/* eslint-disable no-var */
+/* eslint-disable prefer-const */
 import mongoose from 'mongoose';
 
 // Define the type for the cached mongoose connection
