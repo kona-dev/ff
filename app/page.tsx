@@ -1,7 +1,8 @@
 'use client'
 import { useState, useRef, useEffect } from "react";
-import Image from "next/image";
+import { default as NextImage } from "next/image";
 import { Righteous } from 'next/font/google';
+import { setCookie, getCookie, formatDate } from '@/lib/cookies';
 
 const righteous = Righteous({
   weight: '400',
@@ -9,18 +10,31 @@ const righteous = Righteous({
   display: 'swap',
 });
 
+// Add this utility function above the Home component or where appropriate
+const normalizeInput = (input: string): string => {
+  return input
+    .toLowerCase()
+    .replace(/[_\-\.]/g, ' ') // Replace underscores, hyphens, periods with spaces
+    .replace(/\s+/g, ' ')     // Replace multiple spaces with a single space
+    .trim();                  // Remove leading/trailing whitespace
+};
+
+// Add this utility function alongside normalizeInput
+const formatNameForDisplay = (name: string): string => {
+  return name.replace(/_/g, ' ');
+};
+
 export default function Home() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [hasGuessed, setHasGuessed] = useState(false);
   const [guesses, setGuesses] = useState<string[]>([]);
   const [inputValue, setInputValue] = useState('');
-  const [isDropdownVisible, setIsDropdownVisible] = useState(false);
-  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0, width: 0 });
   const [showHints, setShowHints] = useState(false);
   const [availableHints, setAvailableHints] = useState(0);
   const [viewedHints, setViewedHints] = useState(0);
   const [borderAnimationOffsets, setBorderAnimationOffsets] = useState<number[]>([0, 0, 0]);
+  const [isTitleFadingOut, setIsTitleFadingOut] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<{
     _id: string;
@@ -33,6 +47,7 @@ export default function Home() {
     name: string;
     imageUrl: string;
     hints: string[];
+    position: string;
   } | null>(null);
   const [hasWon, setHasWon] = useState(false);
   const [correctGuessIndex, setCorrectGuessIndex] = useState<number | null>(null);
@@ -40,14 +55,111 @@ export default function Home() {
   const [zoomEnabled, setZoomEnabled] = useState(true);
   const [zoomLevel, setZoomLevel] = useState(200);
   const [nextResetTime, setNextResetTime] = useState<string>('');
+  const [isCompleted, setIsCompleted] = useState(false);
+  const [zoomOrigin, setZoomOrigin] = useState('center'); // Default transform origin
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [isBugFormVisible, setIsBugFormVisible] = useState(false);
+  const [bugDescription, setBugDescription] = useState('');
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState("Thank you for your help!");
+  const [toastType, setToastType] = useState<"success" | "error">("success");
+
+  // Helper function to update game state cookie
+  const updateGameStateCookie = (additionalState = {}) => {
+    const today = formatDate(new Date());
+    const gameState = {
+      date: today,
+      guesses,
+      viewedHints,
+      hasWon,
+      availableHints,
+      showHints: showHints,
+      ...additionalState
+    };
+    
+    setCookie('feetdle_game_state', JSON.stringify(gameState), 1); // Store for 1 day
+  };
+
+  // Update the useEffect that loads game state at mount
+  useEffect(() => {
+    // Check completion cookie first
+    const today = formatDate(new Date());
+    const completionCookie = getCookie('feetdle_completion');
+    const gameStateCookie = getCookie('feetdle_game_state');
+    
+    if (completionCookie === today) {
+      setIsCompleted(true);
+      setIsExpanded(true); // Ensure the game UI is shown
+      
+      // Only fetch daily item if not already fetched
+      if (!dailyItem) {
+        const fetchDailyItem = async () => {
+          try {
+            const response = await fetch('/api/daily-item');
+            const data = await response.json();
+            
+            if (data.item) {
+              setDailyItem(data.item);
+              setHasWon(true);
+              setGuesses([data.item.name]);
+              setCorrectGuessIndex(0);
+              // Set hint state for completed game
+              setAvailableHints(3);
+              setViewedHints(3); 
+              setShowHints(true);
+            }
+          } catch (error) {
+            console.error('Error fetching daily item:', error);
+          }
+        };
+        
+        fetchDailyItem();
+      }
+    } else if (gameStateCookie) {
+      // Load saved game state
+      try {
+        const gameState = JSON.parse(gameStateCookie);
+        if (gameState.date === today) {
+          setIsExpanded(true);
+          setGuesses(gameState.guesses || []);
+          
+          // Update hint state
+          setViewedHints(gameState.viewedHints || 0);
+          const calculatedHints = Math.min(Math.floor((gameState.guesses?.length || 0) / 5), 3);
+          setAvailableHints(calculatedHints);
+          
+          // Set showHints based on saved state or calculate it
+          if (gameState.showHints !== undefined) {
+            setShowHints(gameState.showHints);
+          } else {
+            setShowHints(calculatedHints > 0);
+          }
+          
+          setHasGuessed(gameState.guesses?.length > 0 || false);
+          
+          // If user has won in the saved state
+          if (gameState.hasWon) {
+            setHasWon(true);
+            setIsCompleted(true);
+            setCorrectGuessIndex(0);
+          }
+        } else {
+          // Clear old game state if it's from a different day
+          setCookie('feetdle_game_state', '', 0);
+        }
+      } catch (error) {
+        console.error('Error parsing game state cookie:', error);
+      }
+    }
+  }, []);
 
   // Calculate available hints based on guess count
   useEffect(() => {
     setAvailableHints(Math.min(Math.floor(guesses.length / 5), 3));
     
-    // Reduce zoom level by 10% for each guess if zoom is enabled
+    // Reduce zoom level by 5% for each guess ONLY if zoom is enabled
     if (zoomEnabled && guesses.length > 0) {
-      const newZoomLevel = Math.max(100, 200 - (guesses.length * 10));
+      const newZoomLevel = Math.max(50, 200 - (guesses.length * 5));
       setZoomLevel(newZoomLevel);
     }
   }, [guesses.length, zoomEnabled]);
@@ -60,33 +172,6 @@ export default function Home() {
       Math.random() * -10
     ]);
   }, []);
-
-  // Update dropdown position when input is focused or window is resized
-  useEffect(() => {
-    const updatePosition = () => {
-      if (isDropdownVisible && inputRef.current) {
-        const rect = inputRef.current.getBoundingClientRect();
-        setDropdownPosition({
-          top: rect.bottom,
-          left: rect.left,
-          width: rect.width
-        });
-      }
-    };
-    
-    // Update position immediately
-    updatePosition();
-    
-    // Add resize listener to update position when window size changes
-    window.addEventListener('resize', updatePosition);
-    window.addEventListener('scroll', updatePosition);
-    
-    // Cleanup
-    return () => {
-      window.removeEventListener('resize', updatePosition);
-      window.removeEventListener('scroll', updatePosition);
-    };
-  }, [isDropdownVisible, inputValue]);
 
   // Fetch items from the API when component mounts
   useEffect(() => {
@@ -117,20 +202,31 @@ export default function Home() {
         
         if (data.item) {
           setDailyItem(data.item);
+          
+          // Testing logs - remove in production
+          console.log('-------------------------------------');
+          console.log('🔑 Today\'s correct answer:', data.item.name);
+          console.log('🔍 Normalized answer:', normalizeInput(data.item.name));
+          console.log('📍 Position:', data.item.position);
+          console.log('💡 Hints:', data.item.hints);
+          console.log('-------------------------------------');
         }
       } catch (error) {
         console.error('Error fetching daily item:', error);
         // Fallback to first item if daily item fetch fails
         if (items.length > 0) {
-          setDailyItem(items[0]);
+          setDailyItem({
+            ...items[0],
+            position: 'middle' // Add a default position value
+          });
         }
       }
     };
     
-    if (!isLoading && items.length > 0) {
+    if (!isLoading && items.length > 0 && !isCompleted) {
       fetchDailyItem();
     }
-  }, [isLoading, items]);
+  }, [isLoading, items, isCompleted]);
 
   // Calculate time until next reset (midnight PST)
   useEffect(() => {
@@ -174,60 +270,176 @@ export default function Home() {
     return () => clearInterval(intervalId);
   }, [hasWon]);
 
-  const handleGuess = () => {
-    if (inputValue.trim() && !hasWon) {
-      // Check if the input value exists in the items list
-      const isValidGuess = items.some(item => 
-        item.name.toLowerCase() === inputValue.toLowerCase()
-      );
-      
-      if (!isValidGuess) {
-        // If it's not a valid item name, don't add it to guesses
-        return;
-      }
-      
-      const newGuesses = [inputValue, ...guesses]; // Add new guess to the beginning
-      setGuesses(newGuesses);
-      setHasGuessed(true);
-      
-      // Check if the guess is correct
-      if (dailyItem && inputValue.toLowerCase() === dailyItem.name.toLowerCase()) {
-        setHasWon(true);
-        setCorrectGuessIndex(0); // The newest guess is at index 0
-      }
-      
-      setInputValue(''); // Clear input after guess
+  // Update the zoom effect to consider position
+  useEffect(() => {
+    if (dailyItem && dailyItem.position) {
+      const origin = getTransformOrigin(dailyItem.position);
+      setZoomOrigin(origin);
     }
+  }, [dailyItem]);
+
+  // Update the preloadImage function
+  const preloadImage = (src: string) => {
+    return new Promise<void>((resolve, reject) => {
+      setImageLoaded(false); // Reset loaded state immediately when function is called
+      
+      const img = new Image();
+      img.src = src;
+      img.onload = () => {
+        // Small delay to prevent flash
+        setTimeout(() => {
+          setImageLoaded(true);
+          resolve();
+        }, 50);
+      };
+      img.onerror = () => {
+        setImageLoaded(false);
+        reject(new Error('Failed to load image'));
+      };
+    });
   };
 
-  const handleOptionSelect = (option: string) => {
-    setInputValue(option);
-    setIsDropdownVisible(false);
-  };
+  // Update the useEffect to handle image preloading
+  useEffect(() => {
+    if (dailyItem && dailyItem.imageUrl) {
+      preloadImage(dailyItem.imageUrl).catch(error => {
+        console.error('Error preloading image:', error);
+        setImageLoaded(false);
+      });
+    } else {
+      setImageLoaded(false);
+    }
+  }, [dailyItem]);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setInputValue(e.target.value);
-    setIsDropdownVisible(true);
-  };
-
+  // Update the hint toggle function to save state in cookie
   const toggleHints = () => {
     if (availableHints > 0) {
-      setShowHints(true);
-      setViewedHints(availableHints);
+      const newShowHints = !showHints;
+      setShowHints(newShowHints);
+      if (newShowHints) {
+        setViewedHints(availableHints);
+      }
+      // Save state to cookie
+      updateGameStateCookie({ showHints: newShowHints, viewedHints: availableHints });
     } else {
       setShowHints(false);
     }
   };
 
+  // Update handleGuess to save game state after each guess
+  const handleGuess = () => {
+    if (inputValue.trim() && !hasWon && !isCompleted) {
+      const normalizedInput = normalizeInput(inputValue);
+      
+      // Always add the guess to the list
+      const newGuesses = [inputValue, ...guesses];
+      setGuesses(newGuesses);
+      setHasGuessed(true);
+      
+      // Check if the guess is correct
+      if (dailyItem && normalizeInput(dailyItem.name) === normalizedInput) {
+        setHasWon(true);
+        setCorrectGuessIndex(0);
+        setIsCompleted(true);
+        
+        // Set the zoom level to the maximum zoom-out value
+        setZoomLevel(50); // Assuming 50 is the max zoom-out level
+        
+        // Set the completion cookie with today's date
+        const today = formatDate(new Date());
+        setCookie('feetdle_completion', today, 365);
+        
+        // Also update game state
+        updateGameStateCookie({ hasWon: true });
+      } else {
+        // Update game state for incorrect guess
+        updateGameStateCookie({ guesses: newGuesses });
+      }
+      
+      setInputValue('');
+    }
+  };
+
   const rotateImage = () => {
-    // Rotate by 90 degrees each time, completing a full 360 rotation
+    // Rotate the image by 90 degrees
     setImageRotation((prev) => (prev + 90) % 360);
+    
+    // Keep the same zoom origin when rotating
+    // This ensures rotation happens around the zoomed point
   };
 
   const toggleZoom = () => {
-    setZoomEnabled(prev => !prev);
-    // Reset zoom to 200% if enabling, or to 100% if disabling
-    setZoomLevel(zoomEnabled ? 100 : 200);
+    const newZoomEnabled = !zoomEnabled;
+    setZoomEnabled(newZoomEnabled);
+    
+    if (newZoomEnabled) {
+      // When toggled ON: Apply zoom based on guess count
+      const calculatedZoom = Math.max(50, 200 - (guesses.length * 5));
+      setZoomLevel(calculatedZoom);
+    } else {
+      // When toggled OFF: Force zoom at 200%
+      setZoomLevel(200);
+    }
+  };
+
+  const getTransformOrigin = (position: string): string => {
+    const positionMap: Record<string, string> = {
+      'top left': 'left top',
+      'top middle': 'center top',
+      'top right': 'right top',
+      'middle left': 'left center',
+      'middle': 'center',
+      'middle right': 'right center',
+      'bottom left': 'left bottom',
+      'bottom middle': 'center bottom',
+      'bottom right': 'right bottom'
+    };
+    
+    return positionMap[position] || 'center';
+  };
+
+  const handleBugSubmit = async () => {
+    if (!bugDescription.trim()) {
+      setShowToast(true);
+      setToastMessage("Please enter a bug description first");
+      setToastType("error");
+      setTimeout(() => setShowToast(false), 3000);
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/send-bug-report', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ description: bugDescription }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        console.log('Bug description submitted:', bugDescription);
+        setBugDescription('');
+        setIsBugFormVisible(false);
+        setShowToast(true);
+        setToastMessage("Thank you for your help!");
+        setToastType("success");
+        setTimeout(() => setShowToast(false), 3000);
+      } else {
+        console.error('Failed to send bug report:', data.error || 'Unknown error');
+        setShowToast(true);
+        setToastMessage(`Error: ${data.error || 'Failed to send bug report'}`);
+        setToastType("error");
+        setTimeout(() => setShowToast(false), 3000);
+      }
+    } catch (error) {
+      console.error('Error submitting bug report:', error);
+      setShowToast(true);
+      setToastMessage(`Network error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setToastType("error");
+      setTimeout(() => setShowToast(false), 3000);
+    }
   };
 
   return (
@@ -249,12 +461,15 @@ export default function Home() {
       {/* Header/Nav */}
       <header className="relative bg-transparent p-4 z-10">
         <nav className="container mx-auto flex justify-between items-center">
-          <h1 className={`text-xl font-bold text-white ${righteous.className} flex items-center`}>
-            testdle
+          <h1 className={`text-2xl font-bold ${righteous.className} flex items-center`}>
             <span className="
-              animate-gradient bg-gradient-to-r from-white/60 via-gray-400/60 to-white/60 
+              bg-gradient-to-r from-[#8d5524] via-[#c68642] via-[#e0ac69] via-[#f1c27d] via-[#ffdbac] to-[#8d5524]
               bg-[length:200%_100%] bg-clip-text text-transparent
-            ">.xyz</span>
+              animate-gradient-flow
+              text-shadow-glow
+            ">
+              feetdle
+            </span>
           </h1>
           
           <div className="flex-1 flex justify-center items-center">
@@ -286,42 +501,6 @@ export default function Home() {
         </nav>
       </header>
 
-      {/* Dropdown Portal - Moved to root level */}
-      {isDropdownVisible && (
-        <div 
-          className="fixed bg-black/80 border border-gray-800 rounded-lg backdrop-blur-sm shadow-xl max-h-48 overflow-y-auto z-[9999]
-            [&::-webkit-scrollbar]:w-1.5
-            [&::-webkit-scrollbar-track]:bg-black/20
-            [&::-webkit-scrollbar-thumb]:bg-gray-800
-            [&::-webkit-scrollbar-thumb]:rounded-full"
-          style={{
-            top: `${dropdownPosition.top}px`,
-            left: `${dropdownPosition.left}px`,
-            width: `${dropdownPosition.width}px`
-          }}
-        >
-          {isLoading ? (
-            <div className="px-4 py-2 text-gray-400">Loading items...</div>
-          ) : items.length === 0 ? (
-            <div className="px-4 py-2 text-gray-400">No items found</div>
-          ) : (
-            items.map((item, index) => (
-              <button 
-                key={item._id}
-                className="w-full px-4 py-2 text-left text-gray-300 hover:bg-white/10 transition-colors"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  handleOptionSelect(item.name);
-                }}
-              >
-                {item.name}
-              </button>
-            ))
-          )}
-        </div>
-      )}
-      
-
       {/* Main Content */}
       <main className="relative flex-grow container mx-auto p-4 z-10 flex flex-col items-center justify-center">
         <div className="relative flex justify-center">
@@ -334,27 +513,30 @@ export default function Home() {
             <div className={`
               text-center transition-all duration-700 ease-in-out
               ${isExpanded ? 'mt-1 mb-2' : 'flex-1 flex flex-col justify-center'}
+              ${isTitleFadingOut && !isExpanded ? 'animate-fade-out' : ''}
             `}>
               <h2 className={`
                 font-bold ${righteous.className} pb-1
                 flex items-center justify-center transition-all duration-700
-                ${isExpanded ? 'text-4xl' : 'text-6xl'}
+                ${isExpanded ? 'text-5xl' : 'text-7xl'}
               `}>
-                testdle
                 <span className="
-                  animate-gradient bg-gradient-to-r from-white/60 via-gray-400/60 to-white/60 
-                  bg-[length:200%_100%] bg-clip-text text-transparent py-2
-                 
-                ">.xyz</span>
+                  bg-gradient-to-r from-[#8d5524] via-[#c68642] via-[#e0ac69] via-[#f1c27d] via-[#ffdbac] to-[#8d5524]
+                  bg-[length:200%_100%] bg-clip-text text-transparent
+                  animate-gradient-flow
+                ">
+                  feetdle
+                </span>
               </h2>
               {!isExpanded && (
                 <p className={`text-gray-400 text-m ${righteous.className}`}>
-                  embrace your inner       
+                  embrace your inner{" "}       
                   <span className="
-                    animate-gradient bg-gradient-to-r from-[#FFFF00]/100 via-[#FFD700]/100 to-[#FFFF00]/100 
+                    animate-gradient bg-gradient-to-r from-[#FFFF00]/100 via-[#FFFFA0]/100 via-[#FFD700]/100 via-[#FFFFD0]/100 to-[#FFFF00]/100 
                     bg-[length:200%_100%] bg-clip-text text-transparent
+                    text-shadow-glow-yellow
                   ">
-                  beans. 
+                  freak. 
                   </span>
                 </p>
               )}
@@ -390,7 +572,7 @@ export default function Home() {
                     onClick={toggleZoom}
                     className={`
                     w-10 h-8
-                    bg-black/30 
+                    bg-black/30 border
                     rounded-lg shadow-xl
                     backdrop-blur-sm
                     transition-all duration-300
@@ -407,7 +589,7 @@ export default function Home() {
                     </svg>
                     {/* Tooltip */}
                     <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 w-max px-2 py-1 bg-black/80 text-gray-300 text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                      {zoomEnabled ? "zoom enabled" : "zoom disabled"}
+                      {zoomEnabled ? "guesses zoom out picture" : "zoom disabled"}
                     </div>
                   </button>
                   <button 
@@ -442,44 +624,50 @@ export default function Home() {
                 </div>
 
                 {/* Image Container */}
-                <div className="
-                  w-full aspect-square bg-black/30 
-                  border border-gray-800 rounded-lg
-                  backdrop-blur-sm shadow-xl
-                  flex items-center justify-center
-                  overflow-hidden
-                ">
-                  {dailyItem && dailyItem.imageUrl ? (
-                    <div className="w-full h-full flex items-center justify-center overflow-hidden">
-                      <Image 
+                <div 
+                  className="relative w-full aspect-square rounded-lg overflow-hidden animated-border"
+                  style={{ 
+                    cursor: isExpanded ? 'zoom-in' : 'default'
+                  }}
+                  onClick={(e) => {
+                    if (isExpanded) {
+                      // When clicking on the image after expanding, update zoom origin
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const x = ((e.clientX - rect.left) / rect.width) * 100;
+                      const y = ((e.clientY - rect.top) / rect.height) * 100;
+                      
+                      // Set the zoom origin to the click point
+                      setZoomOrigin(`${x}% ${y}%`);
+                    }
+                  }}
+                >
+                  <div 
+                    className="absolute inset-0"
+                    style={{
+                      transform: `rotate(${imageRotation}deg)`,
+                      transformOrigin: 'center',
+                      transition: 'transform 0.3s ease-out'
+                    }}
+                  >
+                    {dailyItem && dailyItem.imageUrl && (
+                      <NextImage
                         src={dailyItem.imageUrl}
-                        alt="Daily item image"
-                        width={500}
-                        height={500}
-                        className="object-contain transition-all duration-300"
-                        style={{ 
-                          transform: `rotate(${imageRotation}deg) scale(${zoomLevel/100})`,
-                          transformOrigin: 'center'
+                        alt="Guess this item"
+                        fill
+                        priority
+                        sizes="(max-width: 768px) 100vw, 500px"
+                        className="object-cover transition-transform duration-300 ease-out" 
+                        style={{
+                          transformOrigin: zoomOrigin,
+                          transform: `scale(${zoomEnabled ? zoomLevel / 100 : 2})`,
+                          opacity: imageLoaded ? 1 : 0,
+                        }}
+                        onLoad={() => {
+                          setImageLoaded(true);
                         }}
                       />
-                    </div>
-                  ) : items.length > 0 && items[0].imageUrl ? (
-                    <div className="w-full h-full flex items-center justify-center overflow-hidden">
-                      <Image 
-                        src={items[0].imageUrl}
-                        alt="Item image"
-                        width={500}
-                        height={500}
-                        className="object-contain transition-all duration-300"
-                        style={{ 
-                          transform: `rotate(${imageRotation}deg) scale(${zoomLevel/100})`,
-                          transformOrigin: 'center'
-                        }}
-                      />
-                    </div>
-                  ) : (
-                    <p className="text-gray-500">Image will appear here</p>
-                  )}
+                    )}
+                  </div>
                 </div>
 
                 {/* Input Field and Button Container - Hide if won */}
@@ -496,17 +684,22 @@ export default function Home() {
                         ref={inputRef}
                         type="text"
                         value={inputValue}
-                        onChange={handleInputChange}
+                        onChange={(e) => setInputValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleGuess();
+                          }
+                        }}
+                        onFocus={() => setIsInputFocused(true)}
+                        onBlur={() => setIsInputFocused(false)}
+                        placeholder="enter guess here"
                         className="
-                          w-full px-4 py-2.5
+                          w-full py-2 px-4
                           bg-transparent
                           text-white placeholder-gray-500
-                          focus:outline-none
-                          h-10 flex items-center
+                          border-none outline-none
+                          focus:ring-0
                         "
-                        placeholder="Enter your guess..."
-                        onFocus={() => setIsDropdownVisible(true)}
-                        onBlur={() => setTimeout(() => setIsDropdownVisible(false), 200)}
                       />
                     </div>
                     <button 
@@ -542,7 +735,7 @@ export default function Home() {
                       Correct!
                     </h3>
                     <p className="text-gray-300">
-                      You guessed today's item: <span className="text-green-400 font-semibold">{dailyItem?.name}</span>
+                      You guessed the feet of the day! | <span className="text-green-400 font-semibold">{dailyItem?.name ? formatNameForDisplay(dailyItem.name) : ''}</span>
                     </p>
                   </div>
                 )}
@@ -570,7 +763,7 @@ export default function Home() {
                 Hints
               </h3>
               <div className="space-y-2 relative pt-1 pb-1">
-                {viewedHints >= 1 && (
+                {viewedHints >= 1 && dailyItem?.hints && dailyItem.hints.length >= 1 && (
                   <div className="pl-4 relative">
                     <div 
                       className="absolute left-0 top-0 bottom-0 w-[2px] bg-gradient-to-b from-[#8A2BE2] via-[#4169E1] to-[#8A2BE2] bg-[length:100%_300%]"
@@ -579,10 +772,10 @@ export default function Home() {
                         animationDelay: `${borderAnimationOffsets[0]}s`
                       }}
                     ></div>
-                    <p className="text-gray-500">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nullam in dui mauris. Vivamus hendrerit arcu sed erat molestie vehicula.</p>
+                    <p className="text-gray-500">{dailyItem.hints[0].replace(/^-\s*/, '')}</p>
                   </div>
                 )}
-                {viewedHints >= 2 && (
+                {viewedHints >= 2 && dailyItem?.hints && dailyItem.hints.length >= 2 && (
                   <div className="pl-4 relative">
                     <div 
                       className="absolute left-0 top-0 bottom-0 w-[2px] bg-gradient-to-b from-[#8A2BE2] via-[#4169E1] to-[#8A2BE2] bg-[length:100%_300%]"
@@ -591,10 +784,10 @@ export default function Home() {
                         animationDelay: `${borderAnimationOffsets[1]}s`
                       }}
                     ></div>
-                    <p className="text-gray-500">Sed auctor neque eu tellus rhoncus ut eleifend nibh porttitor. Ut in nulla enim. Phasellus molestie magna non est bibendum non venenatis nisl tempor.</p>
+                    <p className="text-gray-500">{dailyItem.hints[1].replace(/^-\s*/, '')}</p>
                   </div>
                 )}
-                {viewedHints >= 3 && (
+                {viewedHints >= 3 && dailyItem?.hints && dailyItem.hints.length >= 3 && (
                   <div className="pl-4 relative">
                     <div 
                       className="absolute left-0 top-0 bottom-0 w-[2px] bg-gradient-to-b from-[#8A2BE2] via-[#4169E1] to-[#8A2BE2] bg-[length:100%_300%]"
@@ -603,7 +796,7 @@ export default function Home() {
                         animationDelay: `${borderAnimationOffsets[2]}s`
                       }}
                     ></div>
-                    <p className="text-gray-500">Suspendisse in justo eu magna luctus suscipit. Sed lectus. Integer euismod lacus luctus magna. Quisque cursus, metus vitae pharetra auctor.</p>
+                    <p className="text-gray-500">{dailyItem.hints[2].replace(/^-\s*/, '')}</p>
                   </div>
                 )}
               </div>
@@ -613,16 +806,23 @@ export default function Home() {
 
         {!isExpanded && (
           <button
-            onClick={() => setIsExpanded(true)}
+            onClick={() => {
+              setIsTitleFadingOut(true);
+              // Delay the expansion to allow the fade-out animation to complete
+              setTimeout(() => {
+                setIsExpanded(true);
+                setIsTitleFadingOut(false);
+              }, 700); // Match the animation duration (0.7s)
+            }}
             className="
-              px-10 py-3 border border-gray-600 rounded-md
+              px-8 py-2 border border-gray-600 rounded-md
               text-gray-300 font-[Righteous]
               transition-all duration-500
               hover:bg-gradient-to-r hover:from-[#FFFF00]/10 hover:via-[#FFD700]/10 hover:to-[#FFFF00]/10
               hover:border-[#FFFF00]/30 hover:text-[#FFFF00]
             "
           >
-            start
+            get freaky
           </button>
         
         )}
@@ -644,7 +844,7 @@ export default function Home() {
                   `}
                 >
                   <p className={`${correctGuessIndex === index ? 'text-green-400' : 'text-gray-300'}`}>
-                    {guess}
+                    {formatNameForDisplay(guess)}
                   </p>
                 </div>
               ))}
@@ -670,7 +870,7 @@ export default function Home() {
             animate-gradient bg-gradient-to-r from-white/60 via-gray-400/60 to-white/60 
             bg-[length:200%_100%] bg-clip-text text-transparent
           ">
-            &copy; 2024 testdle - all rights reserved.
+            &copy; 2024 feetdle - all rights reserved.
           </p>
           <a href="/about" className="
             animate-gradient bg-gradient-to-r from-white/60 via-gray-400/60 to-white/60 
@@ -679,6 +879,68 @@ export default function Home() {
           ">
             about
           </a>
+        </div>
+        <div className="absolute bottom-full right-0 mb-4 mr-4">
+          <div 
+            className={`
+              transition-all duration-300 ease-in-out
+              ${isBugFormVisible 
+                ? 'opacity-100 scale-100 translate-y-0' 
+                : 'opacity-0 scale-95 translate-y-4 pointer-events-none'
+              }
+            `}
+          >
+            <div className="bg-black/50 border border-gray-800 rounded-lg p-4 shadow-xl backdrop-blur-sm">
+              <textarea
+                value={bugDescription}
+                onChange={(e) => setBugDescription(e.target.value)}
+                placeholder="Describe the bug... or request more feet!"
+                className="w-full p-2 bg-transparent text-white border border-gray-700 rounded-md mb-2 focus:border-gray-500 focus:outline-none transition-colors duration-200"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setIsBugFormVisible(false)}
+                  className="flex-1 bg-gray-700/50 text-gray-300 font-bold py-2 px-4 rounded-md shadow-lg transition-all duration-200 hover:bg-gray-600/50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleBugSubmit}
+                  className="flex-1 bg-gradient-to-r from-green-500/80 to-green-700/80 text-white font-bold py-2 px-4 rounded-md shadow-lg transition-all duration-200 hover:from-green-500 hover:to-green-700"
+                >
+                  Submit
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          <button
+            onClick={() => setIsBugFormVisible(true)}
+            className={`
+              bg-black/30 border border-gray-800 
+              text-gray-300 font-bold py-2 px-4 rounded-full
+              shadow-lg backdrop-blur-sm
+              transition-all duration-300
+              hover:bg-gradient-to-r hover:from-red-500/10 hover:via-red-600/10 hover:to-red-500/10
+              hover:border-red-500/30 hover:text-red-500
+              ${isBugFormVisible ? 'opacity-0 scale-90 pointer-events-none' : 'opacity-100 scale-100'}
+            `}
+          >
+            Found a bug?
+          </button>
+        </div>
+        <div 
+          className={`
+            absolute bottom-full right-0 mb-16 mr-4 py-2 px-4 rounded-md shadow-lg
+            transition-all duration-300 ease-in-out
+            ${showToast 
+              ? 'opacity-100 transform translate-y-0' 
+              : 'opacity-0 transform translate-y-4 pointer-events-none'
+            }
+            ${toastType === "success" ? "bg-green-500 text-white" : "bg-red-500 text-white"}
+          `}
+        >
+          {toastMessage}
         </div>
       </footer>
     </div>

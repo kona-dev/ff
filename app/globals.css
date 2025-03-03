@@ -28,3 +28,50 @@ body {
     background-position: 0% 100%;
   }
 }
+
+@keyframes rotateGradient {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulseSize {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+}
+
+.animated-border {
+  position: relative;
+  z-index: 1;
+}
+
+.animated-border::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: -2px;
+  padding: 2px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from 0deg,
+    #8d5524,
+    #c68642,
+    #e0ac69,
+    #f1c27d,
+    #ffdbac,
+    #8d5524
+  );
+  -webkit-mask: 
+    linear-gradient(#fff 0 0) content-box, 
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: rotateGradient 8s linear infinite, pulseSize 6s ease-in-out infinite;
+}

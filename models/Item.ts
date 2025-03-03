@@ -15,14 +15,27 @@ const ItemSchema = new mongoose.Schema({
     type: [String],
     default: [],
   },
+  position: {
+    type: String,
+    enum: [
+      'top left',
+      'top middle',
+      'top right',
+      'middle left',
+      'middle',
+      'middle right',
+      'bottom left',
+      'bottom middle',
+      'bottom right'
+    ],
+    default: 'middle',
+  },
   difficulty: {
     type: String,
     enum: ['easy', 'medium', 'hard'],
     default: 'medium',
   },
- 
 }, {
-
   collection: 'entries'
 });
 
