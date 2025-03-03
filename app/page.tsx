@@ -26,6 +26,7 @@ const formatNameForDisplay = (name: string): string => {
 
 export default function Home() {
   const [isExpanded, setIsExpanded] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [hasGuessed, setHasGuessed] = useState(false);
   const [guesses, setGuesses] = useState<string[]>([]);
@@ -151,7 +152,7 @@ export default function Home() {
         console.error('Error parsing game state cookie:', error);
       }
     }
-  }, []);
+  }, [dailyItem]);
 
   // Calculate available hints based on guess count
   useEffect(() => {
