@@ -6,7 +6,7 @@ interface MongooseCache {
   promise: Promise<typeof mongoose> | null;
 }
 
-// Declare the global namespace to extend NodeJS.Global
+// Fix the global namespace declaration
 declare global {
   var mongoose: MongooseCache | undefined;
 }
@@ -19,12 +19,8 @@ if (!MONGODB_URI) {
   );
 }
 
-/**
- * Global is used here to maintain a cached connection across hot reloads
- * in development. This prevents connections growing exponentially
- * during API Route usage.
- */
-const cached = global.mongoose || { conn: null, promise: null };
+// Now use let instead of const for the cached variable
+let cached = global.mongoose || { conn: null, promise: null };
 
 // Initialize the global mongoose cache if it doesn't exist
 if (!global.mongoose) {
