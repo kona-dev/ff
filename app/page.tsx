@@ -80,6 +80,20 @@ export default function Home() {
     setCookie('feetdle_game_state', JSON.stringify(gameState), 1); // Store for 1 day
   };
 
+  // Add this function to check if we need to reset based on PST date
+  const shouldResetDaily = () => {
+    // Get the current date in PST
+    const now = new Date();
+    const pstDate = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+    const todayPST = pstDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+    
+    // Get the last reset date from cookie
+    const lastResetDate = getCookie('lastResetDate');
+    
+    // If no cookie or different date, we should reset
+    return !lastResetDate || lastResetDate !== todayPST;
+  }
+
   // Update the useEffect that loads game state at mount
   useEffect(() => {
     // Check completion cookie first
@@ -228,47 +242,37 @@ export default function Home() {
     }
   }, [isLoading, items, isCompleted]);
 
-  // Calculate time until next reset (midnight PST)
+  // Add this function to calculate time until next reset (midnight PST)
+  const calculateTimeUntilReset = () => {
+    // Get current time in user's timezone
+    const now = new Date();
+    
+    // Create a date object for midnight Pacific Time
+    const pstDate = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+    const midnight = new Date(pstDate);
+    midnight.setHours(24, 0, 0, 0); // Set to next midnight
+    
+    // Calculate time difference in milliseconds
+    const timeUntilMidnight = midnight.getTime() - pstDate.getTime();
+    
+    // Format the time remaining
+    const hours = Math.floor(timeUntilMidnight / (1000 * 60 * 60));
+    const minutes = Math.floor((timeUntilMidnight % (1000 * 60 * 60)) / (1000 * 60));
+    
+    return `${hours}h ${minutes}m`;
+  }
+
+  // Update this in your useEffect that handles the timer
   useEffect(() => {
-    if (!hasWon) return;
-
-    const calculateTimeUntilReset = () => {
-      const now = new Date();
-      
-      // Calculate PST/PDT time (UTC-7 or UTC-8 depending on daylight saving)
-      const pstOffset = -7; // PST is UTC-7 (or -8 during standard time)
-      const pstNow = new Date(now.getTime() + (pstOffset * 60 * 60 * 1000));
-      
-      // Set target time to next midnight PST
-      const tomorrow = new Date(pstNow);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(0, 0, 0, 0);
-      
-      // Convert back to local time for comparison
-      const tomorrowLocal = new Date(tomorrow.getTime() - (pstOffset * 60 * 60 * 1000));
-      
-      // Calculate difference
-      const diff = tomorrowLocal.getTime() - now.getTime();
-      
-      // Calculate hours, minutes, seconds
-      const hours = Math.floor(diff / (1000 * 60 * 60));
-      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-      
-      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    };
-
-    // Update the timer immediately
-    setNextResetTime(calculateTimeUntilReset());
-    
-    // Set up interval to update the timer every second
-    const intervalId = setInterval(() => {
+    const updateTimer = () => {
       setNextResetTime(calculateTimeUntilReset());
-    }, 1000);
+    };
     
-    // Clean up interval on unmount
-    return () => clearInterval(intervalId);
-  }, [hasWon]);
+    updateTimer(); // Initial call
+    const interval = setInterval(updateTimer, 60000); // Update every minute
+    
+    return () => clearInterval(interval);
+  }, []);
 
   // Update the zoom effect to consider position
   useEffect(() => {
@@ -440,6 +444,68 @@ export default function Home() {
       setTimeout(() => setShowToast(false), 3000);
     }
   };
+
+  // Add this to your main useEffect for initialization
+  useEffect(() => {
+    const initializeGame = async () => {
+      // Check if we need to reset daily data
+      if (shouldResetDaily()) {
+        // Reset user data
+        setGuesses([]);
+        setHasWon(false);
+        setCorrectGuessIndex(null);
+        setViewedHints(0);
+        
+        // Save the current PST date as last reset date
+        const now = new Date();
+        const pstDate = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+        const todayPST = pstDate.toISOString().split('T')[0];
+        setCookie('lastResetDate', todayPST, 7); // Keep for 7 days
+        
+        // Clear any game-specific cookies
+        setCookie('guesses', '', 0);
+        setCookie('viewedHints', '0', 1);
+        setCookie('hasWon', 'false', 1);
+      } else {
+        // Load existing game state from cookies
+        const savedGuesses = getCookie('guesses');
+        if (savedGuesses) {
+          setGuesses(JSON.parse(savedGuesses));
+        }
+        
+        const savedViewedHints = getCookie('viewedHints');
+        if (savedViewedHints) {
+          setViewedHints(parseInt(savedViewedHints));
+        }
+        
+        const savedHasWon = getCookie('hasWon');
+        if (savedHasWon === 'true') {
+          setHasWon(true);
+        }
+      }
+      
+      // Continue with loading the daily item...
+      // [Your existing code to fetch the daily item]
+    };
+    
+    initializeGame();
+  }, []);
+
+  // Add this to your handleGuess function after updating state
+  useEffect(() => {
+    // Save current game state to cookies whenever it changes
+    if (guesses.length > 0) {
+      setCookie('guesses', JSON.stringify(guesses), 1);
+    }
+    
+    if (viewedHints > 0) {
+      setCookie('viewedHints', viewedHints.toString(), 1);
+    }
+    
+    if (hasWon) {
+      setCookie('hasWon', 'true', 1);
+    }
+  }, [guesses, viewedHints, hasWon]);
 
   return (
     <div className="min-h-screen flex flex-col bg-black text-white relative overflow-hidden">
