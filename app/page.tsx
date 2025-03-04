@@ -80,19 +80,7 @@ export default function Home() {
     setCookie('feetdle_game_state', JSON.stringify(gameState), 1); // Store for 1 day
   };
 
-  // Add this function to check if we need to reset based on PST date
-  const shouldResetDaily = () => {
-    // Get the current date in PST
-    const now = new Date();
-    const pstDate = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
-    const todayPST = pstDate.toISOString().split('T')[0]; // YYYY-MM-DD format
-    
-    // Get the last reset date from cookie
-    const lastResetDate = getCookie('lastResetDate');
-    
-    // If no cookie or different date, we should reset
-    return !lastResetDate || lastResetDate !== todayPST;
-  }
+ 
 
   // Update the useEffect that loads game state at mount
   useEffect(() => {
@@ -242,35 +230,36 @@ export default function Home() {
     }
   }, [isLoading, items, isCompleted]);
 
-  // Add this function to calculate time until next reset (midnight PST)
+  // Add this function for an accurate timer
   const calculateTimeUntilReset = () => {
-    // Get current time in user's timezone
     const now = new Date();
     
-    // Create a date object for midnight Pacific Time
+    // Convert to PST for consistency
     const pstDate = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
-    const midnight = new Date(pstDate);
-    midnight.setHours(24, 0, 0, 0); // Set to next midnight
     
-    // Calculate time difference in milliseconds
-    const timeUntilMidnight = midnight.getTime() - pstDate.getTime();
+    // Create midnight time for the next day
+    const tomorrow = new Date(pstDate);
+    tomorrow.setDate(pstDate.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
     
-    // Format the time remaining
-    const hours = Math.floor(timeUntilMidnight / (1000 * 60 * 60));
-    const minutes = Math.floor((timeUntilMidnight % (1000 * 60 * 60)) / (1000 * 60));
+    // Calculate difference in milliseconds
+    const diffMs = tomorrow.getTime() - pstDate.getTime();
+    
+    // Convert to hours and minutes
+    const hours = Math.floor(diffMs / (1000 * 60 * 60));
+    const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
     
     return `${hours}h ${minutes}m`;
-  }
+  };
 
-  // Update this in your useEffect that handles the timer
+  // Update your timer useEffect
   useEffect(() => {
     const updateTimer = () => {
       setNextResetTime(calculateTimeUntilReset());
     };
     
-    updateTimer(); // Initial call
-    const interval = setInterval(updateTimer, 60000); // Update every minute
-    
+    updateTimer();
+    const interval = setInterval(updateTimer, 60000);
     return () => clearInterval(interval);
   }, []);
 
@@ -448,47 +437,55 @@ export default function Home() {
   // Add this to your main useEffect for initialization
   useEffect(() => {
     const initializeGame = async () => {
-      // Check if we need to reset daily data
-      if (shouldResetDaily()) {
-        // Reset user data
-        setGuesses([]);
-        setHasWon(false);
-        setCorrectGuessIndex(null);
-        setViewedHints(0);
-        
-        // Save the current PST date as last reset date
-        const now = new Date();
-        const pstDate = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
-        const todayPST = pstDate.toISOString().split('T')[0];
-        setCookie('lastResetDate', todayPST, 7); // Keep for 7 days
-        
-        // Clear any game-specific cookies
-        setCookie('guesses', '', 0);
-        setCookie('viewedHints', '0', 1);
-        setCookie('hasWon', 'false', 1);
-      } else {
-        // Load existing game state from cookies
-        const savedGuesses = getCookie('guesses');
-        if (savedGuesses) {
-          setGuesses(JSON.parse(savedGuesses));
-        }
-        
-        const savedViewedHints = getCookie('viewedHints');
-        if (savedViewedHints) {
-          setViewedHints(parseInt(savedViewedHints));
-        }
-        
-        const savedHasWon = getCookie('hasWon');
-        if (savedHasWon === 'true') {
-          setHasWon(true);
+      // Force reset check based on PST time
+      const now = new Date();
+      const pstDate = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+      const todayPST = pstDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+      
+      // Get the saved date from cookies
+      const savedGameState = getCookie('feetdle_game_state');
+      let gameState = null;
+      
+      if (savedGameState) {
+        try {
+          gameState = JSON.parse(savedGameState);
+        } catch (e) {
+          console.error("Error parsing game state:", e);
         }
       }
       
-      // Continue with loading the daily item...
-      // [Your existing code to fetch the daily item]
+      // Reset if no saved state or date is different
+      const needsReset = !gameState || gameState.date !== todayPST;
+      
+      if (needsReset) {
+        console.log("Resetting game state for new day:", todayPST);
+        
+        // Reset all game states
+        setGuesses([]);
+        setViewedHints(0);
+        setHasWon(false);
+        setCorrectGuessIndex(null);
+        setIsCompleted(false);
+        setShowHints(false);
+        
+        // Save the reset state
+        updateGameStateCookie({ date: todayPST });
+        
+        // Also store the current PST date as lastResetDate
+        setCookie('lastResetDate', todayPST, 7);
+      } else {
+        console.log("Loading existing game state for:", gameState.date);
+        
+        // Load saved state
+        if (gameState.guesses) setGuesses(gameState.guesses);
+        if (gameState.viewedHints !== undefined) setViewedHints(gameState.viewedHints);
+        if (gameState.hasWon !== undefined) setHasWon(gameState.hasWon);
+        if (gameState.showHints !== undefined) setShowHints(gameState.showHints);
+      }
     };
-    
+
     initializeGame();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Add this to your handleGuess function after updating state
