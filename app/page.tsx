@@ -24,6 +24,18 @@ const formatNameForDisplay = (name: string): string => {
   return name.replace(/_/g, ' ');
 };
 
+// Add this function to check if we've passed midnight PST
+const hasPastMidnightPST = () => {
+  const now = new Date();
+  const pstDate = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+  const lastResetDate = getCookie('lastResetDate');
+  
+  if (!lastResetDate) return true;
+  
+  const savedDate = new Date(lastResetDate);
+  return pstDate.toISOString().split('T')[0] !== savedDate.toISOString().split('T')[0];
+};
+
 export default function Home() {
   const [isExpanded, setIsExpanded] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -80,18 +92,22 @@ export default function Home() {
     setCookie('feetdle_game_state', JSON.stringify(gameState), 1); // Store for 1 day
   };
 
- 
-
   // Update the useEffect that loads game state at mount
   useEffect(() => {
     // Check completion cookie first
     const today = formatDate(new Date());
     const completionCookie = getCookie('feetdle_completion');
     const gameStateCookie = getCookie('feetdle_game_state');
+    const hasStartedCookie = getCookie('feetdle_started');
+    
+    // Only expand if user has started the game
+    if (hasStartedCookie === 'true') {
+      setIsExpanded(true);
+    }
     
     if (completionCookie === today) {
       setIsCompleted(true);
-      setIsExpanded(true); // Ensure the game UI is shown
+      setIsExpanded(true); // Always show if completed
       
       // Only fetch daily item if not already fetched
       if (!dailyItem) {
@@ -117,12 +133,17 @@ export default function Home() {
         
         fetchDailyItem();
       }
-    } else if (gameStateCookie) {
-      // Load saved game state
+    }
+
+    // Load saved game state
+    if (gameStateCookie) {
       try {
         const gameState = JSON.parse(gameStateCookie);
         if (gameState.date === today) {
-          setIsExpanded(true);
+          // Only expand if game was started
+          if (hasStartedCookie === 'true') {
+            setIsExpanded(true);
+          }
           setGuesses(gameState.guesses || []);
           
           // Update hint state
@@ -144,6 +165,7 @@ export default function Home() {
             setHasWon(true);
             setIsCompleted(true);
             setCorrectGuessIndex(0);
+            setIsExpanded(true); // Always show if won
           }
         } else {
           // Clear old game state if it's from a different day
@@ -179,14 +201,27 @@ export default function Home() {
   useEffect(() => {
     const fetchItems = async () => {
       try {
-        const response = await fetch('/api/items');
+        console.log('Attempting to fetch items...');
+        const response = await fetch('/api/items', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
         const data = await response.json();
         
         if (data.items) {
+          console.log('Items fetched successfully:', data.items.length);
           setItems(data.items);
         }
       } catch (error) {
         console.error('Error fetching items:', error);
+        // Don't set items if there's an error, but still set loading to false
       } finally {
         setIsLoading(false);
       }
@@ -252,14 +287,36 @@ export default function Home() {
     return `${hours}h ${minutes}m`;
   };
 
-  // Update your timer useEffect
+  // Update your timer useEffect to include reset check
   useEffect(() => {
-    const updateTimer = () => {
+    const checkAndResetGame = () => {
+      if (hasPastMidnightPST()) {
+        // Reset all game states
+        setGuesses([]);
+        setViewedHints(0);
+        setHasWon(false);
+        setCorrectGuessIndex(null);
+        setIsCompleted(false);
+        setShowHints(false);
+        
+        // Clear cookies
+        setCookie('feetdle_game_state', '', 0);
+        setCookie('feetdle_completion', '', 0);
+        
+        // Set new reset date
+        const now = new Date();
+        const pstDate = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+        setCookie('lastResetDate', pstDate.toISOString().split('T')[0], 1);
+        
+        // Fetch new daily item
+        window.location.reload();
+      }
+      
       setNextResetTime(calculateTimeUntilReset());
     };
     
-    updateTimer();
-    const interval = setInterval(updateTimer, 60000);
+    checkAndResetGame();
+    const interval = setInterval(checkAndResetGame, 60000); // Check every minute
     return () => clearInterval(interval);
   }, []);
 
@@ -870,11 +927,12 @@ export default function Home() {
           <button
             onClick={() => {
               setIsTitleFadingOut(true);
+              setCookie('feetdle_started', 'true', 1);
               // Delay the expansion to allow the fade-out animation to complete
               setTimeout(() => {
                 setIsExpanded(true);
                 setIsTitleFadingOut(false);
-              }, 700); // Match the animation duration (0.7s)
+              }, 700);
             }}
             className="
               px-8 py-2 border border-gray-600 rounded-md
