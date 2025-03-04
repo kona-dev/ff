@@ -302,6 +302,7 @@ export default function Home() {
         // Clear cookies
         setCookie('feetdle_game_state', '', 0);
         setCookie('feetdle_completion', '', 0);
+        setCookie('feetdle_started', '', 0);
         
         // Set new reset date
         const now = new Date();
