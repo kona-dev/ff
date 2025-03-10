@@ -6,14 +6,21 @@ export async function GET(): Promise<NextResponse> {
   try {
     await dbConnect();
     
-    // Get the current date in PST
+    // Get the current date in PST using timezone-aware approach
     const now = new Date();
-    const pstOffset = -7; // PST is UTC-7 (or -8 during standard time)
-    const pstDate = new Date(now.getTime() + (pstOffset * 60 * 60 * 1000));
+    const pstDate = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
     const dateString = pstDate.toISOString().split('T')[0]; // YYYY-MM-DD format
     
     // Use the date string as a seed for deterministic randomness
     const seed = dateString.split('-').reduce((acc, val) => acc + parseInt(val), 0);
+    
+    // Add logging to help with debugging timezone issues
+    console.log('Daily Item Selection:', {
+      currentUTC: now.toISOString(),
+      pstDate: pstDate.toISOString(),
+      dateString: dateString,
+      seed: seed
+    });
     
     // Get all items
     const items = await Item.find({});

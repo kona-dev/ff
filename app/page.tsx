@@ -24,6 +24,18 @@ const formatNameForDisplay = (name: string): string => {
   return name.replace(/_/g, ' ');
 };
 
+// Add this function to check if we've passed midnight PST
+const hasPastMidnightPST = () => {
+  const now = new Date();
+  const pstDate = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+  const lastResetDate = getCookie('lastResetDate');
+  
+  if (!lastResetDate) return true;
+  
+  const savedDate = new Date(lastResetDate);
+  return pstDate.toISOString().split('T')[0] !== savedDate.toISOString().split('T')[0];
+};
+
 export default function Home() {
   const [isExpanded, setIsExpanded] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -86,10 +98,16 @@ export default function Home() {
     const today = formatDate(new Date());
     const completionCookie = getCookie('feetdle_completion');
     const gameStateCookie = getCookie('feetdle_game_state');
+    const hasStartedCookie = getCookie('feetdle_started');
+    
+    // Only expand if user has started the game
+    if (hasStartedCookie === 'true') {
+      setIsExpanded(true);
+    }
     
     if (completionCookie === today) {
       setIsCompleted(true);
-      setIsExpanded(true); // Ensure the game UI is shown
+      setIsExpanded(true); // Always show if completed
       
       // Only fetch daily item if not already fetched
       if (!dailyItem) {
@@ -115,12 +133,17 @@ export default function Home() {
         
         fetchDailyItem();
       }
-    } else if (gameStateCookie) {
-      // Load saved game state
+    }
+
+    // Load saved game state
+    if (gameStateCookie) {
       try {
         const gameState = JSON.parse(gameStateCookie);
         if (gameState.date === today) {
-          setIsExpanded(true);
+          // Only expand if game was started
+          if (hasStartedCookie === 'true') {
+            setIsExpanded(true);
+          }
           setGuesses(gameState.guesses || []);
           
           // Update hint state
@@ -142,6 +165,7 @@ export default function Home() {
             setHasWon(true);
             setIsCompleted(true);
             setCorrectGuessIndex(0);
+            setIsExpanded(true); // Always show if won
           }
         } else {
           // Clear old game state if it's from a different day
@@ -177,14 +201,27 @@ export default function Home() {
   useEffect(() => {
     const fetchItems = async () => {
       try {
-        const response = await fetch('/api/items');
+        console.log('Attempting to fetch items...');
+        const response = await fetch('/api/items', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
         const data = await response.json();
         
         if (data.items) {
+          console.log('Items fetched successfully:', data.items.length);
           setItems(data.items);
         }
       } catch (error) {
         console.error('Error fetching items:', error);
+        // Don't set items if there's an error, but still set loading to false
       } finally {
         setIsLoading(false);
       }
@@ -228,47 +265,61 @@ export default function Home() {
     }
   }, [isLoading, items, isCompleted]);
 
-  // Calculate time until next reset (midnight PST)
+  // Add this function for an accurate timer
+  const calculateTimeUntilReset = () => {
+    const now = new Date();
+    
+    // Convert to PST for consistency
+    const pstDate = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+    
+    // Create midnight time for the next day
+    const tomorrow = new Date(pstDate);
+    tomorrow.setDate(pstDate.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+    
+    // Calculate difference in milliseconds
+    const diffMs = tomorrow.getTime() - pstDate.getTime();
+    
+    // Convert to hours and minutes
+    const hours = Math.floor(diffMs / (1000 * 60 * 60));
+    const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    
+    return `${hours}h ${minutes}m`;
+  };
+
+  // Update your timer useEffect to include reset check
   useEffect(() => {
-    if (!hasWon) return;
-
-    const calculateTimeUntilReset = () => {
-      const now = new Date();
+    const checkAndResetGame = () => {
+      if (hasPastMidnightPST()) {
+        // Reset all game states
+        setGuesses([]);
+        setViewedHints(0);
+        setHasWon(false);
+        setCorrectGuessIndex(null);
+        setIsCompleted(false);
+        setShowHints(false);
+        
+        // Clear cookies
+        setCookie('feetdle_game_state', '', 0);
+        setCookie('feetdle_completion', '', 0);
+        setCookie('feetdle_started', '', 0);
+        
+        // Set new reset date
+        const now = new Date();
+        const pstDate = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+        setCookie('lastResetDate', pstDate.toISOString().split('T')[0], 1);
+        
+        // Fetch new daily item
+        window.location.reload();
+      }
       
-      // Calculate PST/PDT time (UTC-7 or UTC-8 depending on daylight saving)
-      const pstOffset = -7; // PST is UTC-7 (or -8 during standard time)
-      const pstNow = new Date(now.getTime() + (pstOffset * 60 * 60 * 1000));
-      
-      // Set target time to next midnight PST
-      const tomorrow = new Date(pstNow);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(0, 0, 0, 0);
-      
-      // Convert back to local time for comparison
-      const tomorrowLocal = new Date(tomorrow.getTime() - (pstOffset * 60 * 60 * 1000));
-      
-      // Calculate difference
-      const diff = tomorrowLocal.getTime() - now.getTime();
-      
-      // Calculate hours, minutes, seconds
-      const hours = Math.floor(diff / (1000 * 60 * 60));
-      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-      
-      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    };
-
-    // Update the timer immediately
-    setNextResetTime(calculateTimeUntilReset());
-    
-    // Set up interval to update the timer every second
-    const intervalId = setInterval(() => {
       setNextResetTime(calculateTimeUntilReset());
-    }, 1000);
+    };
     
-    // Clean up interval on unmount
-    return () => clearInterval(intervalId);
-  }, [hasWon]);
+    checkAndResetGame();
+    const interval = setInterval(checkAndResetGame, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, []);
 
   // Update the zoom effect to consider position
   useEffect(() => {
@@ -440,6 +491,76 @@ export default function Home() {
       setTimeout(() => setShowToast(false), 3000);
     }
   };
+
+  // Add this to your main useEffect for initialization
+  useEffect(() => {
+    const initializeGame = async () => {
+      // Force reset check based on PST time
+      const now = new Date();
+      const pstDate = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+      const todayPST = pstDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+      
+      // Get the saved date from cookies
+      const savedGameState = getCookie('feetdle_game_state');
+      let gameState = null;
+      
+      if (savedGameState) {
+        try {
+          gameState = JSON.parse(savedGameState);
+        } catch (e) {
+          console.error("Error parsing game state:", e);
+        }
+      }
+      
+      // Reset if no saved state or date is different
+      const needsReset = !gameState || gameState.date !== todayPST;
+      
+      if (needsReset) {
+        console.log("Resetting game state for new day:", todayPST);
+        
+        // Reset all game states
+        setGuesses([]);
+        setViewedHints(0);
+        setHasWon(false);
+        setCorrectGuessIndex(null);
+        setIsCompleted(false);
+        setShowHints(false);
+        
+        // Save the reset state
+        updateGameStateCookie({ date: todayPST });
+        
+        // Also store the current PST date as lastResetDate
+        setCookie('lastResetDate', todayPST, 7);
+      } else {
+        console.log("Loading existing game state for:", gameState.date);
+        
+        // Load saved state
+        if (gameState.guesses) setGuesses(gameState.guesses);
+        if (gameState.viewedHints !== undefined) setViewedHints(gameState.viewedHints);
+        if (gameState.hasWon !== undefined) setHasWon(gameState.hasWon);
+        if (gameState.showHints !== undefined) setShowHints(gameState.showHints);
+      }
+    };
+
+    initializeGame();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Add this to your handleGuess function after updating state
+  useEffect(() => {
+    // Save current game state to cookies whenever it changes
+    if (guesses.length > 0) {
+      setCookie('guesses', JSON.stringify(guesses), 1);
+    }
+    
+    if (viewedHints > 0) {
+      setCookie('viewedHints', viewedHints.toString(), 1);
+    }
+    
+    if (hasWon) {
+      setCookie('hasWon', 'true', 1);
+    }
+  }, [guesses, viewedHints, hasWon]);
 
   return (
     <div className="min-h-screen flex flex-col bg-black text-white relative overflow-hidden">
@@ -807,11 +928,12 @@ export default function Home() {
           <button
             onClick={() => {
               setIsTitleFadingOut(true);
+              setCookie('feetdle_started', 'true', 1);
               // Delay the expansion to allow the fade-out animation to complete
               setTimeout(() => {
                 setIsExpanded(true);
                 setIsTitleFadingOut(false);
-              }, 700); // Match the animation duration (0.7s)
+              }, 700);
             }}
             className="
               px-8 py-2 border border-gray-600 rounded-md
