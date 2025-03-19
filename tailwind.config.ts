@@ -15,6 +15,7 @@ export default {
         'fade-out': 'fadeOut 0.7s ease-out forwards',
         'slide-in': 'slideIn 0.7s ease-out forwards',
         'gradient-flow': 'gradient-shift 8s linear infinite',
+        'bob': 'bobbing 2s ease-in-out infinite',
       },
       keyframes: {
         gradient: {
@@ -36,6 +37,10 @@ export default {
         'gradient-shift': {
           '0%, 100%': { backgroundPosition: '0% 50%' },
           '50%': { backgroundPosition: '100% 50%' },
+        },
+        bobbing: {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-4px)' },
         },
       },
       colors: {

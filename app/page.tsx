@@ -59,7 +59,7 @@ export default function Home() {
     name: string;
     imageUrl: string;
     hints: string[];
-    position: string;
+    position: { x: number; y: number };
   } | null>(null);
   const [hasWon, setHasWon] = useState(false);
   const [correctGuessIndex, setCorrectGuessIndex] = useState<number | null>(null);
@@ -238,13 +238,102 @@ export default function Home() {
         const data = await response.json();
         
         if (data.item) {
-          setDailyItem(data.item);
+          // Debug the position data structure
+          console.log('=====================================');
+          console.log('Raw API item response:', JSON.stringify(data.item, null, 2));
+          console.log('API position value:', data.item.position);
+          console.log('API position type:', typeof data.item.position);
+          console.log('API position has x:', data.item.position?.hasOwnProperty('x'));
+          console.log('API position has y:', data.item.position?.hasOwnProperty('y'));
+          console.log('=====================================');
+          
+          // Ensure position is properly formatted
+          let position = { x: 3, y: 3 }; // Default position
+          
+          if (data.item.position) {
+            if (typeof data.item.position === 'object' && data.item.position !== null) {
+              // Extract x and y values, ensuring they are valid numbers
+              // Check if we have the expected structure with direct x,y properties
+              if (data.item.position.hasOwnProperty('x') && data.item.position.hasOwnProperty('y')) {
+                const x = Number(data.item.position.x) || 3;
+                const y = Number(data.item.position.y) || 3;
+                
+                position = {
+                  x: Math.min(Math.max(x, 1), 5),
+                  y: Math.min(Math.max(y, 1), 5)
+                };
+                
+                console.log('Position extracted directly from object:', position);
+              } 
+              // Check if position might be double-nested (position.position.x, position.position.y)
+              else if (data.item.position.position && 
+                      typeof data.item.position.position === 'object' &&
+                      data.item.position.position.hasOwnProperty('x') && 
+                      data.item.position.position.hasOwnProperty('y')) {
+                const x = Number(data.item.position.position.x) || 3;
+                const y = Number(data.item.position.position.y) || 3;
+                
+                position = {
+                  x: Math.min(Math.max(x, 1), 5),
+                  y: Math.min(Math.max(y, 1), 5)
+                };
+                
+                console.log('Position extracted from nested structure:', position);
+              }
+              // Try to find x,y in any property of the position object
+              else {
+                console.log('Searching for x,y in position properties...');
+                const positionObj = data.item.position;
+                
+                // Check each property of the position object to find one that looks like coordinates
+                for (const key in positionObj) {
+                  const val = positionObj[key];
+                  if (typeof val === 'object' && val !== null && 
+                      val.hasOwnProperty('x') && val.hasOwnProperty('y')) {
+                    const x = Number(val.x) || 3;
+                    const y = Number(val.y) || 3;
+                    
+                    position = {
+                      x: Math.min(Math.max(x, 1), 5),
+                      y: Math.min(Math.max(y, 1), 5)
+                    };
+                    
+                    console.log(`Found position in ${key} property:`, position);
+                    break;
+                  }
+                }
+              }
+            } else if (typeof data.item.position === 'string') {
+              // Handle string position format if it exists
+              const positionMap: Record<string, {x: number, y: number}> = {
+                'top left': {x: 1, y: 1},
+                'top middle': {x: 3, y: 1},
+                'top right': {x: 5, y: 1},
+                'middle left': {x: 1, y: 3},
+                'middle': {x: 3, y: 3},
+                'middle right': {x: 5, y: 3},
+                'bottom left': {x: 1, y: 5},
+                'bottom middle': {x: 3, y: 5},
+                'bottom right': {x: 5, y: 5}
+              };
+              
+              position = positionMap[data.item.position] || {x: 3, y: 3};
+              console.log('Converted string position to:', position);
+            }
+          }
+          
+          console.log('Final position being used:', position);
+          
+          setDailyItem({
+            ...data.item,
+            position: position
+          });
           
           // Testing logs - remove in production
           console.log('-------------------------------------');
           console.log('🔑 Today\'s correct answer:', data.item.name);
           console.log('🔍 Normalized answer:', normalizeInput(data.item.name));
-          console.log('📍 Position:', data.item.position);
+          console.log('📍 Position:', `x: ${position.x}, y: ${position.y}`);
           console.log('💡 Hints:', data.item.hints);
           console.log('-------------------------------------');
         }
@@ -254,7 +343,7 @@ export default function Home() {
         if (items.length > 0) {
           setDailyItem({
             ...items[0],
-            position: 'middle' // Add a default position value
+            position: { x: 3, y: 3 } // Default to center position
           });
         }
       }
@@ -324,8 +413,25 @@ export default function Home() {
   // Update the zoom effect to consider position
   useEffect(() => {
     if (dailyItem && dailyItem.position) {
-      const origin = getTransformOrigin(dailyItem.position);
+      console.log('Updating zoom origin based on position:', dailyItem.position);
+      
+      // Ensure position values are valid numbers between 1-5
+      const validPosition = {
+        x: Math.min(Math.max(Number(dailyItem.position.x) || 3, 1), 5),
+        y: Math.min(Math.max(Number(dailyItem.position.y) || 3, 1), 5)
+      };
+      
+      if (validPosition.x !== dailyItem.position.x || validPosition.y !== dailyItem.position.y) {
+        console.log('Corrected invalid position values:', validPosition);
+      }
+      
+      const origin = getTransformOrigin(validPosition);
       setZoomOrigin(origin);
+      
+      console.log('Zoom origin set to:', origin);
+    } else {
+      console.log('No position data available, using default center origin');
+      setZoomOrigin('center');
     }
   }, [dailyItem]);
 
@@ -365,13 +471,19 @@ export default function Home() {
   // Update the hint toggle function to save state in cookie
   const toggleHints = () => {
     if (availableHints > 0) {
-      const newShowHints = !showHints;
-      setShowHints(newShowHints);
-      if (newShowHints) {
-        setViewedHints(availableHints);
+      // If hints are not showing, turn them on
+      if (!showHints) {
+        setShowHints(true);
       }
-      // Save state to cookie
-      updateGameStateCookie({ showHints: newShowHints, viewedHints: availableHints });
+      
+      // Only increment viewedHints if we haven't seen all available hints
+      if (viewedHints < availableHints) {
+        // Show one more hint
+        const newViewedHints = viewedHints + 1;
+        setViewedHints(newViewedHints);
+        // Save state to cookie
+        updateGameStateCookie({ showHints: true, viewedHints: newViewedHints });
+      }
     } else {
       setShowHints(false);
     }
@@ -392,8 +504,11 @@ export default function Home() {
         setCorrectGuessIndex(0);
         setIsCompleted(true);
         
-        // Set the zoom level to the maximum zoom-out value
-        setZoomLevel(50); // Assuming 50 is the max zoom-out level
+        // Ensure zoom is enabled and set to maximum zoom-out
+        setZoomEnabled(true);
+        setZoomLevel(1); // Set to minimum zoom level for full image view
+        // Also set the zoom origin to center to see the full image
+        setZoomOrigin('center');
         
         // Set the completion cookie with today's date
         const today = formatDate(new Date());
@@ -432,20 +547,16 @@ export default function Home() {
     }
   };
 
-  const getTransformOrigin = (position: string): string => {
-    const positionMap: Record<string, string> = {
-      'top left': 'left top',
-      'top middle': 'center top',
-      'top right': 'right top',
-      'middle left': 'left center',
-      'middle': 'center',
-      'middle right': 'right center',
-      'bottom left': 'left bottom',
-      'bottom middle': 'center bottom',
-      'bottom right': 'right bottom'
-    };
+  const getTransformOrigin = (position: { x: number; y: number }): string => {
+    // Convert the 1-5 grid to percentage values (0%, 25%, 50%, 75%, 100%)
+    // For a grid from 1-5, we need to map:
+    // 1 → 0%, 2 → 25%, 3 → 50%, 4 → 75%, 5 → 100%
+    const xPercentage = ((position.x - 1) / 4 * 100) + '%';
+    const yPercentage = ((position.y - 1) / 4 * 100) + '%';
     
-    return positionMap[position] || 'center';
+    console.log(`Position (${position.x}, ${position.y}) maps to origin: ${xPercentage} ${yPercentage}`);
+    
+    return `${xPercentage} ${yPercentage}`;
   };
 
   const handleBugSubmit = async () => {
@@ -757,7 +868,18 @@ export default function Home() {
                       const y = ((e.clientY - rect.top) / rect.height) * 100;
                       
                       // Set the zoom origin to the click point
-                      setZoomOrigin(`${x}% ${y}%`);
+                      const newZoomOrigin = `${x}% ${y}%`;
+                      setZoomOrigin(newZoomOrigin);
+                      
+                      console.log(`Click at (${x.toFixed(2)}%, ${y.toFixed(2)}%) - Setting zoom origin: ${newZoomOrigin}`);
+                      
+                      // If zoom is disabled, enable it on click
+                      if (!zoomEnabled) {
+                        setZoomEnabled(true);
+                        // Calculate zoom level based on guess count
+                        const calculatedZoom = Math.max(50, 200 - (guesses.length * 5));
+                        setZoomLevel(calculatedZoom);
+                      }
                     }
                   }}
                 >
@@ -779,11 +901,17 @@ export default function Home() {
                         className="object-cover transition-transform duration-300 ease-out" 
                         style={{
                           transformOrigin: zoomOrigin,
-                          transform: `scale(${zoomEnabled ? zoomLevel / 100 : 2})`,
+                          transform: hasWon ? 'scale(1)' : `scale(${zoomEnabled ? zoomLevel / 100 : 2})`,
                           opacity: imageLoaded ? 1 : 0,
                         }}
                         onLoad={() => {
                           setImageLoaded(true);
+                          // Log image transform information for debugging
+                          console.log('Image loaded with transform:');
+                          console.log('- Transform origin:', zoomOrigin);
+                          console.log('- Scale:', hasWon ? 1 : (zoomEnabled ? zoomLevel / 100 : 2));
+                          console.log('- Rotation:', imageRotation);
+                          console.log('- Position:', dailyItem.position);
                         }}
                       />
                     )}
@@ -1001,6 +1129,43 @@ export default function Home() {
             about
           </a>
         </div>
+        
+        {/* Ko-fi button - fixed positioning */}
+        <div className="absolute bottom-full left-4 mb-4 flex flex-col items-start">
+          <div className="relative mb-2 px-2 py-1 bg-black/30 rounded-full text-sm text-gray-300 opacity-80 shadow-lg backdrop-blur-sm animate-bob">
+            we can&apos;t have ads!
+            <div className="absolute bottom-0 left-8 w-4 h-4 transform translate-y-2">
+              <svg viewBox="0 0 24 24" className="w-full h-full text-gray-300 fill-current">
+                <path d="M20 12l-8 8-8-8h5V4h6v8z" />
+              </svg>
+            </div>
+          </div>
+          
+          <a
+            href="https://ko-fi.com/produceitem"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`
+              bg-black/30 border border-gray-800 
+              text-gray-300 font-bold py-2 px-4 rounded-full
+              shadow-lg backdrop-blur-sm
+              transition-all duration-300
+              hover:bg-gradient-to-r hover:from-blue-500/10 hover:via-blue-600/10 hover:to-blue-500/10
+              hover:border-blue-500/30 hover:text-blue-400
+              flex items-center gap-2
+            `}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-5 w-5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 8h1a4 4 0 0 1 0 8h-1" />
+              <path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z" />
+              <line x1="6" y1="1" x2="6" y2="4" />
+              <line x1="10" y1="1" x2="10" y2="4" />
+              <line x1="14" y1="1" x2="14" y2="4" />
+            </svg>
+            support on ko-fi
+          </a>
+        </div>
+        
         <div className="absolute bottom-full right-0 mb-4 mr-4">
           <div 
             className={`
@@ -1045,6 +1210,7 @@ export default function Home() {
               hover:bg-gradient-to-r hover:from-red-500/10 hover:via-red-600/10 hover:to-red-500/10
               hover:border-red-500/30 hover:text-red-500
               ${isBugFormVisible ? 'opacity-0 scale-90 pointer-events-none' : 'opacity-100 scale-100'}
+              relative z-10
             `}
           >
             Found a bug?

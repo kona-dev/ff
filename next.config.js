@@ -7,7 +7,6 @@ const nextConfig = {
       { protocol: 'https', hostname: '*.cloudinary.com' },
       { protocol: 'https', hostname: '*.amazonaws.com' }
     ],
-    domains: ['i.imgur.com', 'pics.wikifeet.com'],
     formats: ['image/webp'],
     minimumCacheTTL: 60
   },
